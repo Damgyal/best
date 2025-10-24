@@ -14,7 +14,7 @@
   input, select { width:100%; padding:8px; margin-top:4px; border:1px solid #cbd5e1; border-radius:6px; }
   button { background:#1f6feb; color:white; padding:10px 14px; border:none; border-radius:6px; cursor:pointer; font-weight:600; margin-top:10px; }
   button:hover { background:#155ab6; }
-  .answers input { width:60px; text-transform:uppercase; text-align:center; margin-right:6px; margin-bottom:6px; }
+  .answers select { width:60px; text-transform:uppercase; text-align:center; margin-right:6px; margin-bottom:6px; }
   .row { display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
   #results { margin-top:20px; background:#f9fafb; padding:10px; border-radius:8px; }
   .score { font-weight:bold; color:#1f6feb; }
@@ -33,7 +33,7 @@
 <div class="container">
 <h2>Answer Key Setup</h2>
 <label>Number of Questions:</label><input type="number" id="numQuestions" min="1" max="100" value="5">
-<button id="generateBtn">Generate Correct Answer Inputs</button>
+<button id="generateBtn">Generate Answer Inputs</button>
 <div id="answerInputs" class="answers"></div>
 
 <h2>Live OMR Scan</h2>
@@ -74,7 +74,14 @@ generateBtn.addEventListener('click', ()=>{
   for(let i=1;i<=n;i++){
     const row=document.createElement('div');
     row.className='row';
-    row.innerHTML=`<label>Q${i}:</label><input type="text" maxlength="1" id="ans${i}" placeholder="A-D">`;
+    row.innerHTML=`<label>Q${i}:</label>
+      <select id="ans${i}">
+        <option value="">Select</option>
+        <option value="A">A</option>
+        <option value="B">B</option>
+        <option value="C">C</option>
+        <option value="D">D</option>
+      </select>`;
     answerInputs.appendChild(row);
   }
 });
@@ -94,7 +101,7 @@ snapBtn.addEventListener('click', ()=>{
   omrCanvas.width=video.videoWidth;
   omrCanvas.height=video.videoHeight;
   ctx.drawImage(video,0,0,omrCanvas.width,omrCanvas.height);
-  warped=cv.imread(omrCanvas); // Save snapped frame for processing
+  warped=cv.imread(omrCanvas); // Save snapped frame for analysis
 });
 
 // Reset camera
@@ -110,7 +117,7 @@ zoomRange.addEventListener('input', ()=>{
   omrCanvas.style.transform=`scale(${currentZoom})`;
 });
 
-// AI-style OMR detection
+// --- AI-style OMR reading ---
 function detectOMRAnswers(mat,numQuestions){
     const gray = new cv.Mat();
     cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
@@ -170,7 +177,7 @@ function detectOMRAnswers(mat,numQuestions){
     return answers;
 }
 
-// Analyze OMR
+// --- Analyze button ---
 analyzeBtn.addEventListener('click', ()=>{
     if(!warped){ alert("Snap the OMR sheet first"); return; }
     const n=parseInt(document.getElementById('numQuestions').value);
