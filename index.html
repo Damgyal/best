@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile OMR Scanner</title>
+<title>Auto OMR Scanner</title>
 <style>
 body { margin:0; font-family:system-ui,-apple-system,Roboto,Arial; background:#f4f7fb; }
 .container { max-width:500px; margin:auto; padding:1rem; text-align:center; }
@@ -22,12 +22,11 @@ button:hover { background:#155ab6; }
 <body>
 
 <div class="container">
-<h2>Mobile OMR Scanner</h2>
+<h2>Auto OMR Scanner</h2>
 
 <div id="cameraWrapper">
     <video id="video" autoplay playsinline></video>
     <canvas id="omrCanvas" style="display:none;"></canvas>
-    <div id="a4Overlay"></div>
 </div>
 
 <div id="controls">
@@ -56,98 +55,69 @@ const resultsDiv = document.getElementById("results");
 const answerInputs = document.getElementById("answerInputs");
 const generateBtn = document.getElementById("generateBtn");
 
-let captured = null, warped = null;
+let captured = null, scale = 1, offsetX = 0, offsetY = 0, dragging = false, startX = 0, startY = 0;
 let correctAnswers = [];
-let scale = 1, offsetX = 0, offsetY = 0, dragging = false, startX = 0, startY = 0;
 
-// --- Start camera ---
+// Start camera
 async function startCamera(){
     try{
         const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
         video.srcObject = stream;
         await video.play();
-    } catch(err){
-        alert("Camera access needed: "+err);
-    }
+    } catch(err){ alert("Camera access needed: "+err);}
 }
 startCamera();
 
-// --- Reset camera ---
+// Reset camera
 resetBtn.addEventListener("click", ()=>{
-    captured = null; warped=null;
-    video.style.display = "block";
-    omrCanvas.style.display = "none";
-    analyzeBtn.disabled = true;
+    captured=null;
+    video.style.display="block";
+    omrCanvas.style.display="none";
+    analyzeBtn.disabled=true;
     scale=1; offsetX=0; offsetY=0;
     ctx.setTransform(1,0,0,1,0,0);
-    resultsDiv.innerHTML = '';
+    resultsDiv.innerHTML='';
 });
 
-// --- Generate answer inputs ---
+// Generate answer input fields
 generateBtn.addEventListener("click", ()=>{
     const numQ = parseInt(prompt("Enter number of questions:", "5"));
-    correctAnswers = [];
-    answerInputs.innerHTML = '';
+    correctAnswers=[];
+    answerInputs.innerHTML='';
     for(let i=1;i<=numQ;i++){
         const row = document.createElement("div");
-        row.className = "row";
+        row.className="row";
         row.innerHTML = `<label>Q${i}:</label><input type="text" maxlength="1" id="ans${i}" placeholder="A-D">`;
         answerInputs.appendChild(row);
     }
 });
 
-// --- Snap image ---
+// Snap image
 snapBtn.addEventListener("click", ()=>{
-    omrCanvas.width = video.videoWidth;
-    omrCanvas.height = video.videoHeight;
+    omrCanvas.width=video.videoWidth;
+    omrCanvas.height=video.videoHeight;
     ctx.drawImage(video,0,0,omrCanvas.width,omrCanvas.height);
     captured = ctx.getImageData(0,0,omrCanvas.width,omrCanvas.height);
-    analyzeBtn.disabled = false;
-    video.style.display = "none";
-    omrCanvas.style.display = "block";
-    resultsDiv.innerHTML = "<p>Snapped. Use pinch/drag or wheel/drag to zoom and align.</p>";
+    analyzeBtn.disabled = true;
+    setTimeout(()=>{
+        autoWarpAndDetect();
+    }, 100); // small delay for opencv loading
+    video.style.display="none";
+    omrCanvas.style.display="block";
 });
 
-// --- Zoom & drag ---
-function drawTransformed(){
+// Auto warp and detect OMR sheet
+function autoWarpAndDetect(){
     if(!captured) return;
-    ctx.setTransform(1,0,0,1,0,0);
-    ctx.clearRect(0,0,omrCanvas.width,omrCanvas.height);
-    ctx.setTransform(scale,0,0,scale,offsetX,offsetY);
-    ctx.putImageData(captured,0,0);
-}
-
-// Desktop mouse
-omrCanvas.addEventListener("wheel",(e)=>{e.preventDefault(); scale*=(e.deltaY>0?0.9:1.1); drawTransformed();});
-omrCanvas.addEventListener("mousedown",(e)=>{dragging=true; startX=e.clientX-offsetX; startY=e.clientY-offsetY;});
-omrCanvas.addEventListener("mouseup",()=>{dragging=false;});
-omrCanvas.addEventListener("mouseout",()=>{dragging=false;});
-omrCanvas.addEventListener("mousemove",(e)=>{if(dragging){offsetX=e.clientX-startX; offsetY=e.clientY-startY; drawTransformed();}});
-
-// Mobile touch
-let lastDist=0;
-omrCanvas.addEventListener("touchstart", e=>{
-    if(e.touches.length===2) lastDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
-    else if(e.touches.length===1){dragging=true; startX=e.touches[0].clientX-offsetX; startY=e.touches[0].clientY-offsetY;}
-});
-omrCanvas.addEventListener("touchmove", e=>{
-    e.preventDefault();
-    if(e.touches.length===2){const dist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); scale*=dist/lastDist; lastDist=dist; drawTransformed();}
-    else if(e.touches.length===1 && dragging){ offsetX=e.touches[0].clientX-startX; offsetY=e.touches[0].clientY-startY; drawTransformed();}
-});
-omrCanvas.addEventListener("touchend",()=>{dragging=false;});
-
-// --- Perspective correction (warp) ---
-function warpImage(){
-    const src = cv.imread(omrCanvas);
+    const src = cv.matFromImageData(captured);
     const gray = new cv.Mat();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     cv.GaussianBlur(gray, gray, new cv.Size(5,5),0);
     const thresh = new cv.Mat();
     cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 15, 10);
 
-    // Find contours
-    const contours = new cv.MatVector(), hierarchy = new cv.Mat();
+    const contours = new cv.MatVector();
+    const hierarchy = new cv.Mat();
     cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
     let maxArea = 0, pageContour = null;
@@ -158,16 +128,16 @@ function warpImage(){
             const peri = cv.arcLength(cnt,true);
             const approx = new cv.Mat();
             cv.approxPolyDP(cnt, approx, 0.02*peri, true);
-            if(approx.rows===4){ maxArea=area; pageContour = approx; }
+            if(approx.rows===4){ maxArea=area; pageContour=approx;}
             approx.delete();
         }
         cnt.delete();
     }
-    if(!pageContour){ src.delete(); gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete(); return null;}
+    if(!pageContour){ alert("Could not detect OMR sheet. Adjust lighting or zoom."); src.delete(); gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete(); return;}
 
     // Warp
     const pts = [];
-    for(let i=0;i<4;i++) pts.push({x:pageContour.intAt(i,0),y:pageContour.intAt(i,1)});
+    for(let i=0;i<4;i++) pts.push({x:pageContour.intAt(i,0), y:pageContour.intAt(i,1)});
     pts.sort((a,b)=>a.y-b.y);
     const top = [pts[0], pts[1]].sort((a,b)=>a.x-b.x);
     const bottom = [pts[2], pts[3]].sort((a,b)=>a.x-b.x);
@@ -179,11 +149,15 @@ function warpImage(){
     const warpedMat = new cv.Mat();
     cv.warpPerspective(src, warpedMat, M, new cv.Size(width,height));
 
+    cv.imshow(omrCanvas, warpedMat);
+
     src.delete(); gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete(); pageContour.delete(); srcPts.delete(); dstPts.delete(); M.delete();
-    return warpedMat;
+
+    warped = warpedMat;
+    analyzeBtn.disabled = false;
 }
 
-// --- AI OMR detection ---
+// AI-style OMR detection
 function detectOMRAnswers(img,numQuestions){
     const gray = new cv.Mat();
     cv.cvtColor(img, gray, cv.COLOR_RGBA2GRAY);
@@ -203,61 +177,65 @@ function detectOMRAnswers(img,numQuestions){
         if(aspect>0.7 && aspect<1.3 && area>200 && area<2000) bubbles.push({x:rect.x+rect.width/2, y:rect.y+rect.height/2, rect});
         cnt.delete();
     }
+
     bubbles.sort((a,b)=>a.y-b.y);
     const grouped=[], yThreshold=20;
     for(const b of bubbles){
         let found=false;
-        for(const g of grouped){ if(Math.abs(g[0].y-b.y)<yThreshold){ g.push(b); found=true; break;} }
+        for(const g of grouped){
+            if(Math.abs(g[0].y-b.y)<yThreshold){ g.push(b); found=true; break;}
+        }
         if(!found) grouped.push([b]);
     }
     grouped.forEach(row=>row.sort((a,b)=>a.x-b.x));
 
-    const answers = [];
-    const rows = Math.min(numQuestions, grouped.length);
+    const answers=[];
+    const rows=Math.min(numQuestions, grouped.length);
     for(let i=0;i<rows;i++){
         const row=grouped[i];
-        let shades=[];
+        const shades=[];
         for(let j=0;j<row.length;j++){
             const r=row[j].rect;
-            const roi = thresh.roi(r);
-            const filled = cv.countNonZero(roi);
-            const ratio = filled/(r.width*r.height);
-            shades.push({idx:j,fill:ratio});
+            const roi=thresh.roi(r);
+            const fill=cv.countNonZero(roi)/(r.width*r.height);
+            shades.push({idx:j,fill});
             roi.delete();
         }
         const maxFill=Math.max(...shades.map(s=>s.fill));
         const marked=shades.filter(s=>s.fill>maxFill*0.8);
-        if(marked.length===0) answers.push('None');
-        else if(marked.length>1) answers.push('Multiple');
-        else answers.push(['A','B','C','D'][marked[0].idx]||'?');
+        if(marked.length===0) answers.push("None");
+        else if(marked.length>1) answers.push("Multiple");
+        else answers.push(["A","B","C","D"][marked[0].idx]||"?");
     }
 
     gray.delete(); thresh.delete(); contours.delete(); hierarchy.delete();
     return answers;
 }
 
-// --- Analyze button ---
-analyzeBtn.addEventListener("click",()=>{
-    const warpedMat = warpImage();
-    if(!warpedMat){ alert("Could not detect OMR sheet. Try adjusting zoom or lighting."); return;}
+let warped=null;
+analyzeBtn.addEventListener("click", ()=>{
+    if(!warped){ alert("Warped image not ready"); return;}
     const numQ = correctAnswers.length;
-    const detected = detectOMRAnswers(warpedMat,numQ);
-    warpedMat.delete();
+    for(let i=1;i<=numQ;i++){
+        const val=document.getElementById("ans"+i)?.value.trim().toUpperCase();
+        if(!val.match(/^[A-D]$/)){ alert("Enter valid answers A-D"); return;}
+        correctAnswers[i-1]=val;
+    }
 
-    // Check answers
-    const details=[];
+    const detected = detectOMRAnswers(warped,numQ);
     let score=0;
+    const details=[];
     for(let i=0;i<numQ;i++){
-        const stu=detected[i];
-        let status="❌";
-        if(stu===correctAnswers[i]){ status="✅"; score++;}
+        let stu = detected[i];
+        let status = "❌";
+        if(stu===correctAnswers[i]){ status="✅"; score++; }
         details.push(`<tr><td>${i+1}</td><td>${stu}</td><td>${correctAnswers[i]}</td><td>${status}</td></tr>`);
     }
     resultsDiv.innerHTML=`<h3>Results</h3>
-    <table border="1" cellspacing="0" cellpadding="6">
-    <tr><th>Q#</th><th>Student</th><th>Correct</th><th>Status</th></tr>
-    ${details.join("")}</table>
-    <p>Score: ${score} / ${numQ}</p>`;
+        <table border="1" cellspacing="0" cellpadding="6">
+        <tr><th>Q#</th><th>Student</th><th>Correct</th><th>Status</th></tr>
+        ${details.join("")}</table>
+        <p>Score: ${score}/${numQ}</p>`;
 });
 </script>
 </body>
