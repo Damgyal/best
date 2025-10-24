@@ -105,26 +105,10 @@ snapBtn.addEventListener("click", ()=>{
     analyzeBtn.disabled = false;
     video.style.display = "none";
     omrCanvas.style.display = "block";
-    resultsDiv.innerHTML = "<p>Snapped. Pinch/drag or scroll to adjust alignment.</p>";
+    resultsDiv.innerHTML = "<p>Snapped. Zoom and drag to align.</p>";
 });
 
 // --- Zoom & drag ---
-omrCanvas.addEventListener("wheel",(e)=>{
-    e.preventDefault();
-    const zoom = e.deltaY>0?0.9:1.1;
-    scale *= zoom;
-    drawTransformed();
-});
-
-omrCanvas.addEventListener("mousedown",(e)=>{
-    dragging = true; startX = e.clientX - offsetX; startY = e.clientY - offsetY;
-});
-omrCanvas.addEventListener("mouseup",()=>{dragging=false;});
-omrCanvas.addEventListener("mouseout",()=>{dragging=false;});
-omrCanvas.addEventListener("mousemove",(e)=>{
-    if(dragging){ offsetX = e.clientX - startX; offsetY = e.clientY - startY; drawTransformed(); }
-});
-
 function drawTransformed(){
     ctx.setTransform(1,0,0,1,0,0);
     ctx.clearRect(0,0,omrCanvas.width,omrCanvas.height);
@@ -132,7 +116,41 @@ function drawTransformed(){
     ctx.putImageData(captured,0,0);
 }
 
-// --- Detect OMR answers ---
+// Desktop mouse
+omrCanvas.addEventListener("wheel",(e)=>{
+    e.preventDefault();
+    const zoom = e.deltaY>0?0.9:1.1;
+    scale *= zoom;
+    drawTransformed();
+});
+omrCanvas.addEventListener("mousedown",(e)=>{
+    dragging=true; startX=e.clientX-offsetX; startY=e.clientY-offsetY;
+});
+omrCanvas.addEventListener("mouseup",()=>{dragging=false;});
+omrCanvas.addEventListener("mouseout",()=>{dragging=false;});
+omrCanvas.addEventListener("mousemove",(e)=>{if(dragging){ offsetX=e.clientX-startX; offsetY=e.clientY-startY; drawTransformed(); }});
+
+// Mobile touch
+let lastDist = 0;
+omrCanvas.addEventListener("touchstart", e=>{
+    if(e.touches.length===2){
+        lastDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    } else if(e.touches.length===1){
+        dragging=true; startX=e.touches[0].clientX-offsetX; startY=e.touches[0].clientY-offsetY;
+    }
+});
+omrCanvas.addEventListener("touchmove", e=>{
+    e.preventDefault();
+    if(e.touches.length===2){
+        const dist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+        scale *= dist/lastDist; lastDist = dist; drawTransformed();
+    } else if(e.touches.length===1 && dragging){
+        offsetX=e.touches[0].clientX-startX; offsetY=e.touches[0].clientY-startY; drawTransformed();
+    }
+});
+omrCanvas.addEventListener("touchend", e=>{dragging=false;});
+
+// --- AI OMR detection ---
 function detectOMRAnswers(canvas,numQuestions){
     const src = cv.imread(canvas);
     const gray = new cv.Mat(), blur = new cv.Mat(), thresh = new cv.Mat();
@@ -200,7 +218,9 @@ analyzeBtn.addEventListener("click", ()=>{
         correctAnswers[i-1] = val;
     }
 
+    drawTransformed(); // Ensure current zoom/pan is rendered
     const detected = detectOMRAnswers(omrCanvas,n);
+
     let correctCount=0, html='';
     for(let i=0;i<n;i++){
         let status='❌';
