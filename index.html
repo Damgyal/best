@@ -7,16 +7,16 @@
 <style>
 body { margin:0; font-family:system-ui,-apple-system,Roboto,Arial; background:#f4f7fb; }
 .container { max-width:500px; margin:auto; padding:1rem; text-align:center; }
+#cameraWrapper { position:relative; display:inline-block; width:100%; }
 video, canvas { width:100%; border-radius:10px; background:#000; object-fit:cover; }
+#a4Overlay { position:absolute; border:2px dashed #1f6feb; pointer-events:none; top:5%; left:5%; width:90%; height:70%; }
 #controls { margin-top:10px; display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }
 button { padding:10px 20px; border:none; border-radius:50px; background:#1f6feb; color:white; font-weight:600; cursor:pointer; }
 button:hover { background:#155ab6; }
-#results { margin-top:15px; background:#f9fafb; padding:10px; border-radius:8px; }
 .answers { margin-top:15px; }
 .answers .row { display:flex; gap:10px; margin-bottom:5px; align-items:center; justify-content:center; }
 .answers input { width:40px; text-align:center; border:1px solid #cbd5e1; border-radius:5px; }
-#a4Overlay { position:absolute; border:2px dashed #1f6feb; pointer-events:none; }
-#cameraWrapper { position:relative; display:inline-block; }
+#results { margin-top:15px; background:#f9fafb; padding:10px; border-radius:8px; }
 </style>
 </head>
 <body>
@@ -27,11 +27,12 @@ button:hover { background:#155ab6; }
 <div id="cameraWrapper">
     <video id="video" autoplay playsinline></video>
     <canvas id="omrCanvas" style="display:none;"></canvas>
-    <div id="a4Overlay" style="width:90%; height:70%; top:5%; left:5%;"></div>
+    <div id="a4Overlay"></div>
 </div>
 
 <div id="controls">
 <button id="snapBtn">📸 Snap</button>
+<button id="resetBtn">🔄 Reset</button>
 <button id="analyzeBtn" disabled>Analyze</button>
 </div>
 
@@ -42,15 +43,14 @@ button:hover { background:#155ab6; }
 </div>
 
 <div id="results"></div>
-</div>
 
 <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 <script>
-// Elements
 const video = document.getElementById("video");
 const omrCanvas = document.getElementById("omrCanvas");
 const ctx = omrCanvas.getContext("2d");
 const snapBtn = document.getElementById("snapBtn");
+const resetBtn = document.getElementById("resetBtn");
 const analyzeBtn = document.getElementById("analyzeBtn");
 const resultsDiv = document.getElementById("results");
 const answerInputs = document.getElementById("answerInputs");
@@ -58,8 +58,9 @@ const generateBtn = document.getElementById("generateBtn");
 
 let captured = null;
 let correctAnswers = [];
+let scale = 1, offsetX = 0, offsetY = 0, dragging = false, startX = 0, startY = 0;
 
-// --- Start camera without mirror ---
+// --- Start camera ---
 async function startCamera(){
     try{
         const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
@@ -70,6 +71,17 @@ async function startCamera(){
     }
 }
 startCamera();
+
+// --- Reset camera ---
+resetBtn.addEventListener("click", ()=>{
+    captured = null;
+    video.style.display = "block";
+    omrCanvas.style.display = "none";
+    analyzeBtn.disabled = true;
+    scale = 1; offsetX = 0; offsetY = 0;
+    ctx.setTransform(1,0,0,1,0,0);
+    resultsDiv.innerHTML = '';
+});
 
 // --- Generate answer inputs ---
 generateBtn.addEventListener("click", ()=>{
@@ -93,11 +105,35 @@ snapBtn.addEventListener("click", ()=>{
     analyzeBtn.disabled = false;
     video.style.display = "none";
     omrCanvas.style.display = "block";
-    resultsDiv.innerHTML = "<p>Snapped. Use zoom/pinch to adjust alignment.</p>";
+    resultsDiv.innerHTML = "<p>Snapped. Pinch/drag or scroll to adjust alignment.</p>";
 });
 
-// --- Analyze function ---
-function detectOMRAnswers(canvas, numQuestions){
+// --- Zoom & drag ---
+omrCanvas.addEventListener("wheel",(e)=>{
+    e.preventDefault();
+    const zoom = e.deltaY>0?0.9:1.1;
+    scale *= zoom;
+    drawTransformed();
+});
+
+omrCanvas.addEventListener("mousedown",(e)=>{
+    dragging = true; startX = e.clientX - offsetX; startY = e.clientY - offsetY;
+});
+omrCanvas.addEventListener("mouseup",()=>{dragging=false;});
+omrCanvas.addEventListener("mouseout",()=>{dragging=false;});
+omrCanvas.addEventListener("mousemove",(e)=>{
+    if(dragging){ offsetX = e.clientX - startX; offsetY = e.clientY - startY; drawTransformed(); }
+});
+
+function drawTransformed(){
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,omrCanvas.width,omrCanvas.height);
+    ctx.setTransform(scale,0,0,scale,offsetX,offsetY);
+    ctx.putImageData(captured,0,0);
+}
+
+// --- Detect OMR answers ---
+function detectOMRAnswers(canvas,numQuestions){
     const src = cv.imread(canvas);
     const gray = new cv.Mat(), blur = new cv.Mat(), thresh = new cv.Mat();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
